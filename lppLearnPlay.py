@@ -9,8 +9,6 @@ Created on Wed Aug 22 22:02:05 2018
 import numpy as np
 import matplotlib.pyplot as plt
 
-
-
 from sklearn.datasets import make_blobs
 
 X, y = make_blobs(1000, n_features=300, centers=4,

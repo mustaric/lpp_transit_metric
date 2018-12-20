@@ -5,8 +5,8 @@ Created on Sun Dec 16 13:14:04 2018
 
 @author: smullally
 """
-from __future__ import print_function
-from __future__ import division
+#from __future__ import print_function
+#from __future__ import division
 import scipy.io as spio
 from astropy.io import fits
 import requests

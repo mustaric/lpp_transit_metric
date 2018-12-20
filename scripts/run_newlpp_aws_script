@@ -5,42 +5,74 @@ Created on Mon Aug 27 12:34:01 2018
 
 @author: smullally
 """
-from __future__ import print_function
-from __future__ import division
+#from __future__ import print_function
+#from __future__ import division
+#awskey=os.environ['MYAWSACCESSKEY']
+#awssecretkey = os.environ['AWSSECRETACCESSKEY']
+
 import numpy as np
-from dave.lpp.newlpp.lppDataClasses import TCE
-from dave.lpp.newlpp.lppDataClasses import MapInfo
-from dave.tessPipeline.tessmastio import TessAstroqueryArchive
-import dave.lpp.newlpp.lppTransform as lppt
+from lpp_transit_metric.lppDataClasses import TCE
+from lpp_transit_metric.lppDataClasses import MapInfo
+import lpp_transit_metric.lppTransform as lppt
 from datetime import date
 import pandas as p
+from astroquery.mast import Observations
+import boto3
+from astropy.io import fits
+import os
+from dotenv import load_dotenv
 
-#%%
+load_dotenv('.env')
+os.environ["AWS_ACCESS_KEY_ID"] = os.getenv('YOURAWSACCESSKEY')
+os.environ["AWS_SECRET_ACCESS_KEY"] = os.getenv('YOURSECRETACCESSKEY')
+
+
+#%
 #The following is the code for one.
 
-ticid=114985772
+#ticid=114985772
+#planetNumber = 1
 sector=1
-planetNumber = 1
-mapfilename='/Users/smullally/Code/lpptransitlikemetric/data/maps/combMapDR25AugustMapDV_6574.mat'
-
+ddir = "/Users/smullally/Python_Code/aws/lpp_transit_metric"
+mapfilename=ddir + '/map/combMapDR25AugustMapDV_6574.mat'
+tceCsv = ddir + '/tces/tess2018206190142-s0001-s0001_dvr-tcestats.csv'
+outputFileName="/Users/smullally/TESS/TCEs/tce_lpp_sector1_aws.txt"
 mapInfo=MapInfo(mapfilename)
 
-archive=TessAstroqueryArchive(cachePath = "/Users/smullally/TESS/TCEs/mast/.")
-dvData,dvHeader = archive.getDvt(ticid, sector, ext=planetNumber, header=True)
+#cachePath="/Users/smullally/TESS/TCEs/mast/."
+columns = ['id','planetNum','sector','period','tzero','depth','dur','mes','normTLpp','rawTLpp']
 
-tce=TCE(ticid, planetNumber)
-tce.populateFromDvExt(dvData, dvHeader)
-tce.sector = sector
+tcelist = p.read_csv(tceCsv,comment='#')
 
-normTLpp, rawTLpp, transformedTr=lppt.computeLPPTransitMetric(tce,mapInfo)
 
-tce.normTLpp=normTLpp
-tce.rawTLpp = rawTLpp
-tce.transformedLppTr = transformedTr
-tceDict=tce.__dict__
-
-#%%
-# But I want to loop over the TCEs in the csv files. 
+def get_dvtFile_aws(ticid, sector):
+    """
+    Returns the piece that can be handed to fits.open
+    """
+    
+    obs_query_string = "tess*-s%04i-%016i*" % (sector, ticid)
+    obsTable = Observations.query_criteria(mission="TESS", obs_id=obs_query_string)
+    products = Observations.get_product_list(obsTable)
+    filtered=Observations.filter_products(products,\
+                                            productSubGroupDescription=['DVT'],\
+                                            mrp_only=False, extension="fits")
+    Observations.enable_cloud_dataset()
+    url = Observations.get_cloud_uris(filtered)
+    
+    s3 = boto3.resource('s3')
+    #s3_client = boto3.client('s3')
+    bucket = s3.Bucket('stpubdata')
+    
+    fits_s3_key = url[0].replace("s3://stpubdata/", "")
+    root = "/Users/smullally/data/tess/" + url[0].split('/')[-1]
+    print(root)
+    print(fits_s3_key)
+    bucket.download_file(fits_s3_key, root, ExtraArgs={"RequestPayer": "requester"})
+    
+    fileloc = '/tmp/{0}'.format(root)
+    fileloc = root
+    
+    return fileloc
 
 def write_line(tceDict, columns, output):
     
@@ -61,28 +93,19 @@ def write_header(columns, output):
         output.write("%s  " % c)
     output.write("\n")
 
-#%%
+#%
 #Iterate over many
-tceCsv="/Users/smullally/TESS/TCEs/tess2018206190142-s0001-s0001_dvr-tcestats.csv"
-sector=1
-outputFileName="/Users/smullally/TESS/TCEs/tce_lpp_sector1.txt"
-cachePath="/Users/smullally/TESS/TCEs/mast/."
-columns = ['id','planetNum','sector','period','tzero','depth','dur','mes','normTLpp','rawTLpp']
-
-mapfilename='/Users/smullally/Code/lpptransitlikemetric/data/maps/combMapDR25AugustMapDV_6574.mat'
-mapInfo=MapInfo(mapfilename)
-
-tcelist = p.read_csv(tceCsv,comment='#')
-
 output=open(outputFileName,'w')
 write_header(columns,output)
 
-for i,row in tcelist[0:3].iterrows():
+for i,row in tcelist[0:2].iterrows():
     
-    archive=TessAstroqueryArchive(cachePath = cachePath)
-    dvData,dvHeader = archive.getDvt(row.ticid, sector, ext=row.planetNumber, header=True) 
+    fileloc=get_dvtFile_aws(row.ticid, sector)
+    data,header = fits.getdata(fileloc, ext=row.planetNumber, header=True)
+    #archive=TessAstroqueryArchive(cachePath = cachePath)
+    #dvData,dvHeader = archive.getDvt(row.ticid, sector, ext=row.planetNumber, header=True) 
     tce=TCE(row.ticid, row.planetNumber)
-    tce.populateFromDvExt(dvData, dvHeader)
+    tce.populateFromDvExt(data, header)
     tce.sector = sector
     
     normTLpp, rawTLpp, transformedTr=lppt.computeLPPTransitMetric(tce,mapInfo)
@@ -95,3 +118,17 @@ for i,row in tcelist[0:3].iterrows():
 
 output.close()
 
+
+#%%
+"""
+tce=TCE(ticid, planetNumber)
+tce.populateFromDvExt(dvData, dvHeader)
+tce.sector = sector
+
+normTLpp, rawTLpp, transformedTr=lppt.computeLPPTransitMetric(tce,mapInfo)
+
+tce.normTLpp=normTLpp
+tce.rawTLpp = rawTLpp
+tce.transformedLppTr = transformedTr
+tceDict=tce.__dict__
+"""
